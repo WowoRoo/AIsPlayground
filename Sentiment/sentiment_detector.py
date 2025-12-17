@@ -47,6 +47,7 @@ class SentimentDetector:
         Args:
             conversation_text: Tekst rozmowy w formacie:
                               "Rozmówca1: tekst wypowiedzi\nRozmówca2: tekst wypowiedzi"
+                              Może zawierać ramy czasowe na początku linii: "[timedate - timedate]"
         
         Returns:
             Lista słowników z kluczami 'speaker' i 'text'
@@ -58,6 +59,10 @@ class SentimentDetector:
             line = line.strip()
             if not line:
                 continue
+            
+            # Usuwanie ram czasowych na początku linii w formacie [timedate - timedate]
+            # Przykład: [2024-01-01 10:00:00 - 2024-01-01 10:00:05] Anna: Cześć!
+            line = re.sub(r'^\[[^\]]+\]\s*', '', line)
             
             # Szukamy wzorca "Nazwa: tekst" lub "NAZWA: tekst"
             match = re.match(r'^([^:]+):\s*(.+)$', line)
