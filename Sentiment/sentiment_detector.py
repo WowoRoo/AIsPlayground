@@ -87,6 +87,24 @@ class SentimentDetector:
         
         return messages
     
+    def _normalize_sentiment_label(self, label: str) -> str:
+        """
+        Normalizuje etykietę sentymentu do polskiego formatu
+        
+        Args:
+            label: Etykieta z modelu
+        
+        Returns:
+            Znormalizowana etykieta (POZYTYWNY, NEGATYWNY, NEUTRALNY)
+        """
+        label_upper = label.upper()
+        if 'POSITIVE' in label_upper or 'POZYTYWNY' in label_upper:
+            return 'POZYTYWNY'
+        elif 'NEGATIVE' in label_upper or 'NEGATYWNY' in label_upper:
+            return 'NEGATYWNY'
+        else:
+            return 'NEUTRALNY'
+    
     def analyze_sentiment(self, text: str) -> Dict[str, any]:
         """
         Analizuje sentyment pojedynczego tekstu
@@ -113,16 +131,9 @@ class SentimentDetector:
             result = self.sentiment_pipeline(text)[0]
             
             # Mapowanie etykiet na bardziej czytelne formaty
-            label = result['label'].upper()
+            label = result['label']
             score = result['score']
-            
-            # Normalizacja etykiet
-            if 'POSITIVE' in label or 'POZYTYWNY' in label:
-                sentiment = 'POZYTYWNY'
-            elif 'NEGATIVE' in label or 'NEGATYWNY' in label:
-                sentiment = 'NEGATYWNY'
-            else:
-                sentiment = 'NEUTRALNY'
+            sentiment = self._normalize_sentiment_label(label)
             
             return {
                 'label': sentiment,
@@ -137,6 +148,65 @@ class SentimentDetector:
                 'text': text,
                 'error': str(e)
             }
+    
+    def analyze_sentiment_batch(self, texts: List[str], batch_size: int = 32) -> List[Dict[str, any]]:
+        """
+        Analizuje sentyment wielu tekstów jednocześnie (batch processing)
+        
+        Args:
+            texts: Lista tekstów do analizy
+            batch_size: Rozmiar batcha (domyślnie 32)
+        
+        Returns:
+            Lista słowników z wynikami analizy sentymentu
+        """
+        if not texts:
+            return []
+        
+        # Przygotowanie tekstów (obcięcie do max_length)
+        max_length = 512
+        processed_texts = []
+        original_indices = []
+        
+        for i, text in enumerate(texts):
+            if not text or not text.strip():
+                processed_texts.append("")
+                original_indices.append(i)
+            else:
+                processed_text = text[:max_length] if len(text) > max_length else text
+                processed_texts.append(processed_text)
+                original_indices.append(i)
+        
+        results = []
+        
+        try:
+            # Przetwarzanie w batchach
+            for i in range(0, len(processed_texts), batch_size):
+                batch = processed_texts[i:i + batch_size]
+                batch_results = self.sentiment_pipeline(batch)
+                
+                # Normalizacja wyników
+                for j, result in enumerate(batch_results):
+                    label = result['label']
+                    score = result['score']
+                    sentiment = self._normalize_sentiment_label(label)
+                    
+                    original_idx = original_indices[i + j]
+                    original_text = texts[original_idx]
+                    
+                    results.append({
+                        'label': sentiment,
+                        'score': score,
+                        'text': original_text[:max_length] if len(original_text) > max_length else original_text
+                    })
+        
+        except Exception as e:
+            print(f"Błąd podczas batch analizy sentymentu: {e}")
+            # Fallback do pojedynczych analiz w przypadku błędu
+            for text in texts:
+                results.append(self.analyze_sentiment(text))
+        
+        return results
     
     def analyze_conversation(self, conversation_text: str) -> Dict[str, any]:
         """
@@ -162,11 +232,17 @@ class SentimentDetector:
         # Rozpoczęcie pomiaru czasu analizy sentymentu
         analysis_start_time = time.time()
         
-        for msg in messages:
+        # Zbieranie wszystkich tekstów do batch processing
+        texts = [msg['text'] for msg in messages]
+        
+        # Analiza sentymentu w batchach (bardziej wydajne na GPU)
+        sentiment_results = self.analyze_sentiment_batch(texts, batch_size=32)
+        
+        # Mapowanie wyników z powrotem do wiadomości
+        for i, msg in enumerate(messages):
             speaker = msg['speaker']
             text = msg['text']
-            
-            sentiment_result = self.analyze_sentiment(text)
+            sentiment_result = sentiment_results[i]
             
             result_entry = {
                 'speaker': speaker,
